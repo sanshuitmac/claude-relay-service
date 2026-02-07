@@ -107,37 +107,19 @@
               1. 配置文件 config.toml
             </h6>
             <p class="mb-3 text-sm text-yellow-700 dark:text-yellow-300">
+              ⚠️ 修改前请先备份原文件。
+            </p>
+            <p class="mb-3 text-sm text-yellow-700 dark:text-yellow-300">
               在
               <code class="rounded bg-yellow-100 px-1 dark:bg-yellow-900">{{ configPath }}</code>
               文件开头添加以下配置：
+              <span v-if="platform === 'windows'">
+                （Windows 路径示例：
+                <code class="rounded bg-yellow-100 px-1 dark:bg-yellow-900"
+                  >C:\Users\你的用户名\.codex\config.toml</code
+                >）
+              </span>
             </p>
-            <p
-              v-if="platform === 'windows'"
-              class="mb-3 text-sm text-yellow-700 dark:text-yellow-300"
-            >
-              Windows 路径示例：
-              <code class="rounded bg-yellow-100 px-1 dark:bg-yellow-900"
-                >C:\Users\你的用户名\.codex\config.toml</code
-              >
-            </p>
-            <div
-              class="mb-3 rounded border border-yellow-300 bg-yellow-100 p-2 dark:border-yellow-500/40 dark:bg-yellow-900/30"
-            >
-              <p class="mb-2 text-sm text-yellow-800 dark:text-yellow-300">
-                ⚠️ 修改前请先备份原文件：
-              </p>
-              <div
-                class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
-              >
-                <div v-if="platform === 'windows'" class="whitespace-nowrap text-gray-300">
-                  Copy-Item "$env:USERPROFILE\.codex\config.toml"
-                  "$env:USERPROFILE\.codex\config.toml.bak" -Force
-                </div>
-                <div v-else class="whitespace-nowrap text-gray-300">
-                  cp ~/.codex/config.toml ~/.codex/config.toml.bak
-                </div>
-              </div>
-            </div>
             <div
               class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
             >
@@ -186,37 +168,19 @@
               2. 认证文件 auth.json
             </h6>
             <p class="mb-3 text-sm text-orange-700 dark:text-orange-300">
+              ⚠️ 修改前请先备份原文件。
+            </p>
+            <p class="mb-3 text-sm text-orange-700 dark:text-orange-300">
               在
               <code class="rounded bg-orange-100 px-1 dark:bg-orange-900">{{ authPath }}</code>
               文件中配置：
+              <span v-if="platform === 'windows'">
+                （Windows 路径示例：
+                <code class="rounded bg-orange-100 px-1 dark:bg-orange-900"
+                  >C:\Users\你的用户名\.codex\auth.json</code
+                >）
+              </span>
             </p>
-            <p
-              v-if="platform === 'windows'"
-              class="mb-3 text-sm text-orange-700 dark:text-orange-300"
-            >
-              Windows 路径示例：
-              <code class="rounded bg-orange-100 px-1 dark:bg-orange-900"
-                >C:\Users\你的用户名\.codex\auth.json</code
-              >
-            </p>
-            <div
-              class="mb-3 rounded border border-orange-300 bg-orange-100 p-2 dark:border-orange-500/40 dark:bg-orange-900/30"
-            >
-              <p class="mb-2 text-sm text-orange-800 dark:text-orange-300">
-                ⚠️ 修改前请先备份原文件：
-              </p>
-              <div
-                class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
-              >
-                <div v-if="platform === 'windows'" class="whitespace-nowrap text-gray-300">
-                  Copy-Item "$env:USERPROFILE\.codex\auth.json"
-                  "$env:USERPROFILE\.codex\auth.json.bak" -Force
-                </div>
-                <div v-else class="whitespace-nowrap text-gray-300">
-                  cp ~/.codex/auth.json ~/.codex/auth.json.bak
-                </div>
-              </div>
-            </div>
             <div
               class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
             >
