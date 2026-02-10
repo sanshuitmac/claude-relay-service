@@ -15,9 +15,20 @@ TARGET_CODEX_TUTORIAL="$ROOT_DIR/web/admin-spa/src/components/tutorial/CodexTuto
 TARGET_API_STATS_VIEW="$ROOT_DIR/web/admin-spa/src/views/ApiStatsView.vue"
 
 BACKUP_DIR="/tmp/crs-codex-tutorial-backup-$(date +%Y%m%d-%H%M%S)"
+SERVICE_NAME="${SERVICE_NAME:-claude-relay}"
 
 log() {
   echo "[codex-tutorial] $*"
+}
+
+run_systemctl() {
+  if [[ "$EUID" -eq 0 ]]; then
+    systemctl "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo systemctl "$@"
+  else
+    systemctl "$@"
+  fi
 }
 
 backup_and_copy() {
@@ -43,13 +54,17 @@ backup_and_copy() {
 restart_service() {
   cd "$ROOT_DIR"
 
-  if command -v crs >/dev/null 2>&1; then
-    log "执行服务重启: crs restart"
-    crs restart
-    return
+  if command -v systemctl >/dev/null 2>&1 \
+    && systemctl list-unit-files "${SERVICE_NAME}.service" --type=service --no-legend 2>/dev/null | grep -q "^${SERVICE_NAME}\\.service"; then
+    log "执行服务重启: systemctl restart $SERVICE_NAME"
+    if run_systemctl restart "$SERVICE_NAME"; then
+      return
+    fi
+    log "systemctl 重启失败，尝试 npm 脚本重启"
+  else
+    log "未检测到 ${SERVICE_NAME}.service，尝试 npm 脚本重启"
   fi
 
-  log "未找到 crs 命令，尝试 npm 脚本重启"
   if npm run service:restart:d; then
     return
   fi
@@ -81,4 +96,3 @@ main() {
 }
 
 main "$@"
-
