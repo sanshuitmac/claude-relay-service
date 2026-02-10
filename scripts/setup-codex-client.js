@@ -3,9 +3,11 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const readline = require('readline')
 const { execFileSync } = require('child_process')
 
 const DEFAULT_BASE_URL = 'https://codex.funai.vip/openai'
+const VERIFY_API_URL = 'https://codex.funai.vip/apiStats/api/get-key-id'
 const DEFAULT_MODEL = 'gpt-5.3-codex'
 const DEFAULT_REASONING = 'high'
 const ENV_KEY = 'CRS_OAI_KEY'
@@ -19,6 +21,7 @@ const KNOWN_FLAGS = new Set([
   '-r',
   '--scope',
   '--shell-file',
+  '--skip-verify',
   '--dry-run',
   '--no-backup',
   '--help',
@@ -29,36 +32,43 @@ function log(message) {
   console.log(`[codex-setup] ${message}`)
 }
 
+function failAndExit(message) {
+  throw new Error(message)
+}
+
 function showHelp() {
-  console.log('用法:')
-  console.log('  node scripts/setup-codex-client.js --api-key <cr_xxx> [选项]')
-  console.log('  node scripts/setup-codex-client.js <cr_xxx>')
+  console.log('Usage:')
+  console.log('  node setup-codex-client.js')
+  console.log('  node setup-codex-client.js --api-key <cr_xxx> [options]')
   console.log('')
-  console.log('选项:')
-  console.log('  --api-key, -k     必填，CRS API Key（例如 cr_xxxxxxxxxx）')
-  console.log(`  base_url          已固定为: ${DEFAULT_BASE_URL}`)
-  console.log(`  --model, -m       模型名（默认: ${DEFAULT_MODEL}）`)
-  console.log(`  --reasoning, -r   推理级别（默认: ${DEFAULT_REASONING}）`)
-  console.log('  --scope           Windows 环境变量作用域: user|machine（默认: user）')
-  console.log('  --shell-file      macOS/Linux 指定写入哪个 shell 配置文件')
-  console.log('  --dry-run         仅打印将执行的操作，不落盘')
-  console.log('  --no-backup       不备份已有 config.toml 和 auth.json')
-  console.log('  --help, -h        显示帮助')
+  console.log('Options:')
+  console.log('  --api-key, -k     API key (if omitted, prompt input is used)')
+  console.log(`  base_url          Fixed: ${DEFAULT_BASE_URL}`)
+  console.log(`  verify_api        Fixed: ${VERIFY_API_URL}`)
+  console.log(`  --model, -m       Model (default: ${DEFAULT_MODEL})`)
+  console.log(`  --reasoning, -r   Reasoning effort (default: ${DEFAULT_REASONING})`)
+  console.log('  --scope           Windows env scope: user|machine (default: user)')
+  console.log('  --shell-file      macOS/Linux shell rc file override')
+  console.log('  --skip-verify     Skip verify API call (not recommended)')
+  console.log('  --dry-run         Print actions only, no file writes')
+  console.log('  --no-backup       Do not backup existing files')
+  console.log('  --help, -h        Show help')
   console.log('')
-  console.log('示例:')
-  console.log('  node scripts/setup-codex-client.js -k cr_xxx')
-  console.log('  bash scripts/setup-codex-client.sh cr_xxx')
-  console.log('  powershell -ExecutionPolicy Bypass -File scripts/setup-codex-client.ps1 -k cr_xxx')
+  console.log('Examples:')
+  console.log('  node setup-codex-client.js')
+  console.log('  node setup-codex-client.js -k cr_xxxxxxxxxx')
 }
 
 function parseOptions(argv) {
   const options = {
-    apiKey: process.env[ENV_KEY] || '',
+    apiKey: '',
     baseUrl: DEFAULT_BASE_URL,
+    verifyApiUrl: VERIFY_API_URL,
     model: process.env.CRS_MODEL || DEFAULT_MODEL,
     reasoning: process.env.CRS_REASONING || DEFAULT_REASONING,
     scope: 'user',
     shellFile: '',
+    skipVerify: false,
     dryRun: false,
     noBackup: false,
     help: false
@@ -68,8 +78,7 @@ function parseOptions(argv) {
 
   const assignValue = (key, value, flagName) => {
     if (!value || value.startsWith('-')) {
-      console.error(`[codex-setup] 参数 ${flagName} 缺少值`)
-      process.exit(1)
+      failAndExit(`Argument ${flagName} requires a value`)
     }
     options[key] = value
   }
@@ -89,6 +98,11 @@ function parseOptions(argv) {
 
     if (arg === '--no-backup') {
       options.noBackup = true
+      continue
+    }
+
+    if (arg === '--skip-verify') {
+      options.skipVerify = true
       continue
     }
 
@@ -149,8 +163,7 @@ function parseOptions(argv) {
 
     if (arg.startsWith('-')) {
       if (!KNOWN_FLAGS.has(arg)) {
-        console.error(`[codex-setup] 未知参数: ${arg}`)
-        process.exit(1)
+        failAndExit(`Unknown option: ${arg}`)
       }
       continue
     }
@@ -163,8 +176,70 @@ function parseOptions(argv) {
   }
 
   options.scope = String(options.scope || '').toLowerCase()
-
   return options
+}
+
+function ensureValidOptions(options) {
+  if (options.help) {
+    return
+  }
+
+  if (options.scope !== 'user' && options.scope !== 'machine') {
+    failAndExit('--scope must be user or machine')
+  }
+}
+
+function askApiKey() {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    })
+
+    rl.question('请输入 API Key（cr_xxxxxxxxxx）: ', (answer) => {
+      rl.close()
+      resolve(String(answer || '').trim())
+    })
+  })
+}
+
+async function verifyApiKey(apiKey, options) {
+  if (options.skipVerify) {
+    log('Skip verify enabled, API validation is skipped')
+    return
+  }
+
+  if (options.dryRun) {
+    log(`(dry-run) Verify API key via: ${options.verifyApiUrl}`)
+    return
+  }
+
+  log('Verifying API key...')
+  const response = await fetch(options.verifyApiUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ apiKey })
+  })
+
+  let payload = null
+  try {
+    payload = await response.json()
+  } catch (error) {
+    payload = null
+  }
+
+  if (!response.ok) {
+    const serverMessage = payload?.message || payload?.error || `HTTP ${response.status}`
+    failAndExit(`API key verify failed: ${serverMessage}`)
+  }
+
+  if (!payload || payload.success !== true) {
+    failAndExit('API key verify failed: response.success is not true')
+  }
+
+  log('API key verification passed')
 }
 
 function pad2(value) {
@@ -178,7 +253,7 @@ function buildTimestamp() {
 
 function ensureCodexDir(codexDir, options) {
   if (options.dryRun) {
-    log(`(dry-run) 创建目录: ${codexDir}`)
+    log(`(dry-run) Create directory: ${codexDir}`)
     return
   }
 
@@ -192,22 +267,22 @@ function backupFile(filePath, options) {
 
   const backupPath = `${filePath}.bak-${buildTimestamp()}`
   if (options.dryRun) {
-    log(`(dry-run) 备份: ${filePath} -> ${backupPath}`)
+    log(`(dry-run) Backup: ${filePath} -> ${backupPath}`)
     return
   }
 
   fs.copyFileSync(filePath, backupPath)
-  log(`已备份: ${backupPath}`)
+  log(`Backed up: ${backupPath}`)
 }
 
 function writeTextFile(filePath, content, options) {
   if (options.dryRun) {
-    log(`(dry-run) 写入文件: ${filePath}`)
+    log(`(dry-run) Write file: ${filePath}`)
     return
   }
 
   fs.writeFileSync(filePath, content, 'utf8')
-  log(`已写入: ${filePath}`)
+  log(`Wrote: ${filePath}`)
 }
 
 function resolveHomePath(inputPath) {
@@ -270,13 +345,13 @@ function updateShellExport(shellFilePath, apiKey, options) {
   const nextContent = [...filteredLines, exportLine, ''].join('\n')
 
   if (options.dryRun) {
-    log(`(dry-run) 更新环境变量文件: ${shellFilePath}`)
+    log(`(dry-run) Update env file: ${shellFilePath}`)
     return
   }
 
   fs.mkdirSync(path.dirname(shellFilePath), { recursive: true })
   fs.writeFileSync(shellFilePath, nextContent, 'utf8')
-  log(`已更新环境变量文件: ${shellFilePath}`)
+  log(`Updated env file: ${shellFilePath}`)
 }
 
 function setWindowsEnv(apiKey, options) {
@@ -285,7 +360,7 @@ function setWindowsEnv(apiKey, options) {
   const command = `[System.Environment]::SetEnvironmentVariable('${ENV_KEY}', '${escapedApiKey}', [System.EnvironmentVariableTarget]::${target})`
 
   if (options.dryRun) {
-    log(`(dry-run) 设置 Windows ${target} 环境变量: ${ENV_KEY}`)
+    log(`(dry-run) Set Windows ${target} env: ${ENV_KEY}`)
     return
   }
 
@@ -293,33 +368,12 @@ function setWindowsEnv(apiKey, options) {
     execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], {
       stdio: 'ignore'
     })
-    log(`已设置 Windows ${target} 环境变量: ${ENV_KEY}`)
+    log(`Set Windows ${target} env: ${ENV_KEY}`)
   } catch (error) {
-    console.error(`[codex-setup] 设置 Windows 环境变量失败: ${error.message}`)
     if (target === 'Machine') {
-      console.error('[codex-setup] Machine 级变量通常需要管理员权限，请尝试改用 --scope user')
+      failAndExit('Set machine env failed (admin permission may be required). Try --scope user')
     }
-    process.exit(1)
-  }
-}
-
-function ensureValidOptions(options) {
-  if (options.help) {
-    return
-  }
-
-  if (!options.apiKey) {
-    console.error('[codex-setup] 缺少 API Key，请通过 --api-key 传入')
-    process.exit(1)
-  }
-
-  if (!options.apiKey.startsWith('cr_')) {
-    log('警告: API Key 看起来不是 cr_ 开头，请确认是否填写正确')
-  }
-
-  if (options.scope !== 'user' && options.scope !== 'machine') {
-    console.error('[codex-setup] --scope 仅支持 user 或 machine')
-    process.exit(1)
+    failAndExit(`Set Windows env failed: ${error.message}`)
   }
 }
 
@@ -345,7 +399,7 @@ function buildAuthJson() {
   return '{\n  "OPENAI_API_KEY": null\n}\n'
 }
 
-function main() {
+async function main() {
   const options = parseOptions(process.argv.slice(2))
   ensureValidOptions(options)
 
@@ -353,6 +407,21 @@ function main() {
     showHelp()
     return
   }
+
+  let apiKey = String(options.apiKey || '').trim()
+  if (!apiKey) {
+    apiKey = await askApiKey()
+  }
+
+  if (!apiKey) {
+    failAndExit('API key is required')
+  }
+
+  if (!apiKey.startsWith('cr_')) {
+    log('Warning: API key does not start with cr_, please double-check')
+  }
+
+  await verifyApiKey(apiKey, options)
 
   const codexDir = path.join(os.homedir(), '.codex')
   const configPath = path.join(codexDir, 'config.toml')
@@ -366,21 +435,24 @@ function main() {
   writeTextFile(authPath, buildAuthJson(), options)
 
   if (process.platform === 'win32') {
-    setWindowsEnv(options.apiKey, options)
+    setWindowsEnv(apiKey, options)
   } else {
     const shellRcPath = detectShellRcPath(options)
-    updateShellExport(shellRcPath, options.apiKey, options)
-    log(`请执行: source ${shellRcPath}`)
+    updateShellExport(shellRcPath, apiKey, options)
+    log(`Run this command now: source ${shellRcPath}`)
   }
 
   if (!options.dryRun) {
-    log('完成：Codex 配置与环境变量已设置')
+    log('Done: Codex config and environment variable are set')
     if (process.platform === 'win32') {
-      log('请关闭并重新打开终端或 VSCode 后再运行 codex')
+      log('Please reopen terminal or restart VSCode, then run codex')
     } else {
-      log('建议重新打开终端后运行 codex')
+      log('Please reopen terminal, then run codex')
     }
   }
 }
 
-main()
+main().catch((error) => {
+  console.error(`[codex-setup] ${error.message}`)
+  process.exitCode = 1
+})
