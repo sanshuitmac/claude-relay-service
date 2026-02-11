@@ -1,0 +1,2 @@
+在D:\develop\Vscode-py\claude-relay-service\scripts中的setup-codex-client.js
+但服务器上位置是：/opt/codex-install/setup.js
