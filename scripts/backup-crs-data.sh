@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_DIR="${BACKUP_DIR:-$ROOT_DIR/backup}"
 TS="$(date +%Y%m%d-%H%M%S)"
 
+# 旧的在线备份redis数据，已没啥用，用新的脚本dbbackup.sh备份并上传到rn小鸡
 # 本机直连 Redis 的默认参数（可按需在执行前覆盖环境变量）
 REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
 REDIS_PORT="${REDIS_PORT:-6379}"
