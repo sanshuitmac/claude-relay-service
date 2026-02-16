@@ -1,0 +1,44 @@
+codex api中转 改crs前端使用教程只剩下 codex： 换新的TutorialView.vue   见vscode github仓库claude-relay-service    或者本文件夹【只有codex的使用教程前端vue】内2个vue
+
+覆盖修改到~/claude-relay-service/app/web/admin-spa/src/views/TutorialView.vue
+和  /root/claude-relay-service/app/web/admin-spa/src/components/tutorial/CodexTutorial.vue
+
+改前端：
+cd /root/claude-relay-service/app/web/admin-spa/src/views/
+vim TutorialView.vue       vim ApiStatsView.vue
+cd ~/claude-relay-service/app/web/admin-spa
+npx eslint "./src/views/TutorialView.vue" --fix                    ====关键命令 消除vue文件格式报错【结尾多余空行也报错不能生成dist】
+npx eslint "./src/views/ApiStatsView.vue" --fix 
+
+npm run build
+grep -aR "Codex 使用教程" dist | head
+cd ~/claude-relay-service/app
+systemctl start claude-relay  【后面交由了system管理】
+---crs restart---弃用？
+
+cd /root/claude-relay-service/app/web/admin-spa/src/components/tutorial
+vim CodexTutorial.vue
+cd ~/claude-relay-service/app/web/admin-spa
+npx eslint "./src/components/tutorial/CodexTutorial.vue" --cache=false --fix
+npm run build
+
+systemctl start claude-relay  【后面交由了system管理】
+---crs restart---弃用？
+
+
+
+
+这两个template文件服务器备份，更新项目后运行脚本即可自动配置。 
+【三个文件见GitHub项目，vscode打开台式：D:\develop\Vscode-py\claude-relay-service\scripts 。】
+【wps此目录的：“只有codex的使用教程前端vue模板“文件夹内的两个vue文件上传到下方服务器对于路径】
+mkdir -p /root/claude-relay-service/app/scripts/custom-overrides
+cd /root/claude-relay-service/app/scripts/custom-overrides
+vim  TutorialView.vue   CodexTutorial.vue
+
+cd /root/claude-relay-service/app/scripts/           
+vim reapply-codex-tutorial.sh
+chmod +x reapply-codex-tutorial.sh
+
+
+重点：
+或者直接：每次crs update更新完只需：cd /root/claude-relay-service/app/scripts/      ./reapply-codex-tutorial.sh

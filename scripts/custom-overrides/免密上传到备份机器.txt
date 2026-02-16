@@ -1,0 +1,37 @@
+主机：sgg.funai.vip  跑crs  。备机：us1rn.funai.vip
+生成密钥（若已有 /root/.ssh/id_ed25519 可跳过）
+mkdir -p /root/.ssh && chmod 700 /root/.ssh
+ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N ""
+
+先信任目标主机（避免 cron 卡在 host key 确认）
+ssh-keyscan -H us1rn.funai.vip >> /root/.ssh/known_hosts
+chmod 600 /root/.ssh/known_hosts
+
+下发公钥到目标机 root@us1rn.funai.vip
+ssh-copy-id -i /root/.ssh/id_ed25519.pub root@us1rn.funai.vip
+如果没有 ssh-copy-id，用这个：
+cat /root/.ssh/id_ed25519.pub | ssh root@us1rn.funai.vip "mkdir -p /root/.ssh && chmod 700 /root/.ssh && cat >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"
+
+验证免密是否成功（必须返回 ok，且不提示输密码）
+ssh -o BatchMode=yes root@us1rn.funai.vip "echo ok"
+
+再验证上传目录权限（你的脚本也会自动 mkdir -p /crs-backup）
+ssh -o BatchMode=yes root@us1rn.funai.vip "mkdir -p /crs-backup && ls -ld /crs-backup"
+如果第 4 步通过，cron 跑 dbbackup.sh 就能免密上传。
+
+
+
+两个文件：
+ dbbackup.sh  dbcleanup.sh   【wps云文档，若无，则去wx记录，现在服务器上，之后托管到GitHub py项目】
+上传（编辑全选黏贴）到对应位置，chmod +x 授权
+1、主机上脚本都放在：/root/claude-relay-service/app/scripts  ，备份目录是：/root/claude-relay-service/app/backup/db
+主机定时备份：crontab -e
+0 6 * * * /root/claude-relay-service/app/scripts/dbbackup.sh >> /var/log/crs-dbbackup.log 2>&1
+
+主机定时清理定时：crontab -e
+30 6 * * * BACKUP_DIR=/root/claude-relay-service/app/backup/db /bin/bash /root/claude-relay-service/app/scripts/dbcleanup.sh >> /var/log/crs-dbcleanup.log 2>&1
+
+2、备机所用目录 ：/crs-backup  root上传 dbcleanup.sh    chmod+x
+crontab -e
+0 7 * * * BACKUP_DIR=/crs-backup /bin/bash /crs-backup/dbcleanup.sh >> /var/log/crs-dbcleanup.log 2>&1
+
