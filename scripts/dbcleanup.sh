@@ -6,7 +6,7 @@ BACKUP_DIR="${BACKUP_DIR:-$ROOT_DIR/backup/db}"
 REMOTE_HOST="${REMOTE_HOST:-us1rn.funai.vip}"
 REMOTE_USER="${REMOTE_USER:-root}"
 REMOTE_DIR="${REMOTE_DIR:-/crs-backup}"
-RETAIN_COUNT="${RETAIN_COUNT:-2}"
+RETAIN_COUNT="${RETAIN_COUNT:-7}"
 
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15)
 
