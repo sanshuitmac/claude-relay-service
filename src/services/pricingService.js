@@ -396,6 +396,15 @@ class PricingService {
       return this.pricingData[modelName]
     }
 
+    // Temporary fallback: keep gpt-5.3-codex billed like gpt-5.2-codex.
+    if (modelName === 'gpt-5.3-codex' && !this.pricingData['gpt-5.3-codex']) {
+      const fallbackPricing = this.pricingData['gpt-5.2-codex']
+      if (fallbackPricing) {
+        logger.info(`💰 Using gpt-5.2-codex pricing as fallback for ${modelName}`)
+        return fallbackPricing
+      }
+    }
+
     // 特殊处理：gpt-5-codex 回退到 gpt-5
     if (modelName === 'gpt-5-codex' && !this.pricingData['gpt-5-codex']) {
       const fallbackPricing = this.pricingData['gpt-5']
