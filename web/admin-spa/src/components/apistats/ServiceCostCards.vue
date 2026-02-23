@@ -83,29 +83,6 @@
             </span>
           </div>
         </div>
-
-        <!-- 价格参考 -->
-        <div
-          v-if="service.pricing"
-          class="space-y-0.5 border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-500"
-        >
-          <div class="flex justify-between">
-            <span>输入</span>
-            <span>{{ service.pricing.input }}/M</span>
-          </div>
-          <div class="flex justify-between">
-            <span>输出</span>
-            <span>{{ service.pricing.output }}/M</span>
-          </div>
-          <div v-if="service.pricing.cacheCreate" class="flex justify-between">
-            <span>缓存创建</span>
-            <span>{{ service.pricing.cacheCreate }}/M</span>
-          </div>
-          <div v-if="service.pricing.cacheRead" class="flex justify-between">
-            <span>缓存读取</span>
-            <span>{{ service.pricing.cacheRead }}/M</span>
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -159,8 +136,7 @@ const serviceStats = computed(() => {
       cacheCreateTokens: 0,
       cacheReadTokens: 0,
       realCost: 0,
-      ratedCost: 0,
-      pricing: null
+      ratedCost: 0
     }
   })
 
@@ -183,9 +159,6 @@ const serviceStats = computed(() => {
           ? model.costs.rated
           : modelRealCost * globalRate * keyRate
       stats[service].ratedCost += modelRatedCost
-      if (!stats[service].pricing && model.pricing) {
-        stats[service].pricing = model.pricing
-      }
     }
   })
 
@@ -201,7 +174,6 @@ const serviceStats = computed(() => {
     .map(([service, data]) => {
       const globalRate = serviceRates.value.rates[service] || 1.0
       const keyRate = multiKeyMode.value ? 1.0 : (keyServiceRates.value?.[service] ?? 1.0)
-      const p = data.pricing
       return {
         name: service,
         label: serviceLabels[service] || service,
@@ -212,15 +184,7 @@ const serviceStats = computed(() => {
         cacheCreateTokens: data.cacheCreateTokens,
         cacheReadTokens: data.cacheReadTokens,
         officialCost: formatCost(data.realCost),
-        ccCost: formatCost(data.ratedCost),
-        pricing: p
-          ? {
-              input: formatCost(p.input),
-              output: formatCost(p.output),
-              cacheCreate: p.cacheCreate ? formatCost(p.cacheCreate) : null,
-              cacheRead: p.cacheRead ? formatCost(p.cacheRead) : null
-            }
-          : null
+        ccCost: formatCost(data.ratedCost)
       }
     })
     .sort((a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens))

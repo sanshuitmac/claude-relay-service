@@ -77,23 +77,23 @@ class PricingService {
 
     // Codex 模型计费别名（强制映射）。
     // 维护方式：只需要在这里增删映射，不用在 getModelPricing 里堆 if/else。
-    this.codexModelAliases = {
-      // gpt-5.3-codex 暂按 gpt-5.2-codex 计费
-      'gpt-5.3-codex': 'gpt-5.2-codex'
-    }
+    this.codexModelAliases = {}
+
+    // GPT-5 系列在上游没有价格字段时，统一回退到 gpt-5.3-codex 自定义定价。
+    this.gpt5NoPricingFallbackBase = 'gpt-5.3-codex'
 
     // Codex 基础兜底顺序（当目标模型与版本回退都找不到时）。
     this.codexBaseFallbackOrder = ['gpt-5-codex', 'gpt-5']
 
     // 兜底价格：用于镜像数据缺失时仍保持计费一致性
     this.codexPricingFallbacks = {
-      // 按 gpt-5.2-codex 计费（单位：美元/token）
+      // gpt-5.3-codex 自定义计费（单位：美元/token）
       'gpt-5.3-codex': {
-        input_cost_per_token: 0.00000175,
-        output_cost_per_token: 0.000014,
-        cache_read_input_token_cost: 0.000000175,
+        input_cost_per_token: 0.0000016,
+        output_cost_per_token: 0.000012,
+        cache_read_input_token_cost: 0.000000155,
         litellm_provider: 'openai',
-        source: 'hardcoded:gpt-5.2-codex-fallback'
+        source: 'hardcoded:gpt-5.3-codex-custom'
       }
     }
   }
@@ -421,8 +421,19 @@ class PricingService {
     }
   }
 
+  _hasTokenPricing(pricing) {
+    if (!pricing) {
+      return false
+    }
+
+    return (
+      typeof pricing.input_cost_per_token === 'number' &&
+      typeof pricing.output_cost_per_token === 'number'
+    )
+  }
+
   _getPricingByBase(baseModel, prefix = '', options = {}) {
-    const { includeHardcoded = true } = options
+    const { includeHardcoded = true, requireTokenPricing = false } = options
     const candidates = []
 
     if (prefix) {
@@ -432,11 +443,17 @@ class PricingService {
 
     for (const key of candidates) {
       if (this.pricingData[key]) {
+        if (requireTokenPricing && !this._hasTokenPricing(this.pricingData[key])) {
+          continue
+        }
         return { pricing: this.pricingData[key], key }
       }
     }
 
     if (includeHardcoded && this.codexPricingFallbacks[baseModel]) {
+      if (requireTokenPricing && !this._hasTokenPricing(this.codexPricingFallbacks[baseModel])) {
+        return null
+      }
       return {
         pricing: this.codexPricingFallbacks[baseModel],
         key: `hardcoded:${baseModel}`
@@ -484,36 +501,66 @@ class PricingService {
       knownBases.add(key)
     }
 
-    let bestMinor = -1
-    let bestBase = null
-
+    const candidates = []
     for (const candidateBase of knownBases) {
       const candidateMinor = this._extractCodexMinorVersion(candidateBase)
       if (candidateMinor === null) {
         continue
       }
-
-      if (candidateMinor <= targetMinor && candidateMinor > bestMinor) {
-        bestMinor = candidateMinor
-        bestBase = candidateBase
+      if (candidateMinor <= targetMinor) {
+        candidates.push({ candidateBase, candidateMinor })
       }
     }
 
-    if (!bestBase) {
+    candidates.sort((a, b) => b.candidateMinor - a.candidateMinor)
+
+    for (const { candidateBase } of candidates) {
+      const resolvedBase = this._resolveCodexAliasBase(candidateBase)
+      const pricingInfo = this._getPricingByBase(resolvedBase, prefix, {
+        includeHardcoded: true,
+        requireTokenPricing: true
+      })
+      if (!pricingInfo) {
+        continue
+      }
+
+      return {
+        ...pricingInfo,
+        baseModel: candidateBase,
+        resolvedBaseModel: resolvedBase
+      }
+    }
+
+    return null
+  }
+
+  _resolveGpt5StandardPricing(modelName) {
+    const { prefix, base } = this._splitModelName(modelName)
+    const isGpt5StandardFamily = /^gpt-5(?:\.\d+)?$/.test(base)
+    if (!isGpt5StandardFamily) {
       return null
     }
 
-    const resolvedBase = this._resolveCodexAliasBase(bestBase)
-    const pricingInfo = this._getPricingByBase(resolvedBase, prefix, { includeHardcoded: true })
-    if (!pricingInfo) {
-      return null
+    const exactPricing = this._getPricingByBase(base, prefix, {
+      includeHardcoded: false,
+      requireTokenPricing: true
+    })
+    if (exactPricing) {
+      return exactPricing.pricing
     }
 
-    return {
-      ...pricingInfo,
-      baseModel: bestBase,
-      resolvedBaseModel: resolvedBase
+    const fallback = this._getPricingByBase(this.gpt5NoPricingFallbackBase, prefix, {
+      includeHardcoded: true,
+      requireTokenPricing: true
+    })
+    if (fallback) {
+      logger.info(
+        `💰 Upstream pricing missing for ${modelName}, using ${this.gpt5NoPricingFallbackBase} pricing`
+      )
+      return fallback.pricing
     }
+
+    return null
   }
 
   _resolveCodexPricing(modelName) {
@@ -527,7 +574,10 @@ class PricingService {
     // 1) 强制别名优先（例如 5.3 -> 5.2）
     const aliasTarget = this._resolveCodexAliasBase(base)
     if (aliasTarget && aliasTarget !== base) {
-      const aliasPricing = this._getPricingByBase(aliasTarget, prefix, { includeHardcoded: true })
+      const aliasPricing = this._getPricingByBase(aliasTarget, prefix, {
+        includeHardcoded: true,
+        requireTokenPricing: true
+      })
       if (aliasPricing) {
         logger.info(`💰 Using ${aliasTarget} pricing as forced alias for ${modelName}`)
         return aliasPricing.pricing
@@ -535,9 +585,24 @@ class PricingService {
     }
 
     // 2) 精确命中官方价格（包含 provider 前缀和无前缀）
-    const exactPricing = this._getPricingByBase(base, prefix, { includeHardcoded: false })
+    const exactPricing = this._getPricingByBase(base, prefix, {
+      includeHardcoded: false,
+      requireTokenPricing: true
+    })
     if (exactPricing) {
       return exactPricing.pricing
+    }
+
+    // 2.5) gpt-5.x-codex 上游无定价时，优先回退到 gpt-5.3-codex 自定义价格
+    const preferredFallback = this._getPricingByBase(this.gpt5NoPricingFallbackBase, prefix, {
+      includeHardcoded: true,
+      requireTokenPricing: true
+    })
+    if (preferredFallback) {
+      logger.info(
+        `💰 Upstream pricing missing for ${modelName}, using ${this.gpt5NoPricingFallbackBase} pricing`
+      )
+      return preferredFallback.pricing
     }
 
     // 3) 对 gpt-5.x-codex 自动回退到「最近可用的较低版本」
@@ -552,7 +617,8 @@ class PricingService {
     // 4) 最终兜底（gpt-5-codex -> gpt-5）
     for (const fallbackBase of this.codexBaseFallbackOrder) {
       const fallbackPricing = this._getPricingByBase(fallbackBase, prefix, {
-        includeHardcoded: true
+        includeHardcoded: true,
+        requireTokenPricing: true
       })
       if (fallbackPricing) {
         logger.info(`💰 Using ${fallbackBase} pricing as fallback for ${modelName}`)
@@ -572,6 +638,11 @@ class PricingService {
     const codexPricing = this._resolveCodexPricing(modelName)
     if (codexPricing) {
       return codexPricing
+    }
+
+    const gpt5StandardPricing = this._resolveGpt5StandardPricing(modelName)
+    if (gpt5StandardPricing) {
+      return gpt5StandardPricing
     }
 
     // 尝试直接匹配
