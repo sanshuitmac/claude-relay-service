@@ -240,6 +240,14 @@ export const useApiStatsStore = defineStore('apistats', () => {
           summary.cost += model.costs?.total || 0
         })
 
+        // 单 Key 日统计以 daily ledger 为准，避免与「每日限额」口径不一致
+        if (period === 'daily' && !multiKeyMode.value) {
+          const dailyLedgerCost = Number(statsData.value?.limits?.currentDailyCost)
+          if (Number.isFinite(dailyLedgerCost) && dailyLedgerCost >= 0) {
+            summary.cost = dailyLedgerCost
+          }
+        }
+
         summary.formattedCost = formatCost(summary.cost)
 
         // 存储到对应的时间段数据

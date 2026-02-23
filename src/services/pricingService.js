@@ -74,6 +74,18 @@ class PricingService {
       }
       // 未来可以添加更多 1M 模型的价格
     }
+
+    // 兜底价格：用于镜像数据缺失时仍保持计费一致性
+    this.codexPricingFallbacks = {
+      // 按 gpt-5.2-codex 计费（单位：美元/token）
+      'gpt-5.3-codex': {
+        input_cost_per_token: 0.00000175,
+        output_cost_per_token: 0.000014,
+        cache_read_input_token_cost: 0.000000175,
+        litellm_provider: 'openai',
+        source: 'hardcoded:gpt-5.2-codex-fallback'
+      }
+    }
   }
 
   // 初始化价格服务
@@ -390,19 +402,27 @@ class PricingService {
       return null
     }
 
+    // 强制别名：gpt-5.3-codex 一律按 gpt-5.2-codex 计费
+    // 说明：不能依赖“是否存在 gpt-5.3-codex 条目”，否则镜像变更会导致计费口径漂移
+    const isGpt53Codex =
+      modelName === 'gpt-5.3-codex' || modelName.endsWith('/gpt-5.3-codex')
+    if (isGpt53Codex) {
+      const prefixedFallbackKey = modelName.replace(/gpt-5\.3-codex$/, 'gpt-5.2-codex')
+      const fallbackPricing =
+        this.pricingData[prefixedFallbackKey] ||
+        this.pricingData['gpt-5.2-codex'] ||
+        this.codexPricingFallbacks['gpt-5.3-codex']
+
+      if (fallbackPricing) {
+        logger.info(`💰 Using gpt-5.2-codex pricing as forced fallback for ${modelName}`)
+        return fallbackPricing
+      }
+    }
+
     // 尝试直接匹配
     if (this.pricingData[modelName]) {
       logger.debug(`💰 Found exact pricing match for ${modelName}`)
       return this.pricingData[modelName]
-    }
-
-    // Temporary fallback: keep gpt-5.3-codex billed like gpt-5.2-codex.
-    if (modelName === 'gpt-5.3-codex' && !this.pricingData['gpt-5.3-codex']) {
-      const fallbackPricing = this.pricingData['gpt-5.2-codex']
-      if (fallbackPricing) {
-        logger.info(`💰 Using gpt-5.2-codex pricing as fallback for ${modelName}`)
-        return fallbackPricing
-      }
     }
 
     // 特殊处理：gpt-5-codex 回退到 gpt-5

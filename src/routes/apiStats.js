@@ -835,8 +835,9 @@ router.post('/api/batch-model-stats', async (req, res) => {
       if (hasStoredCost) {
         costData.costs.real = (usage.realCostMicro || 0) / 1000000
         costData.costs.rated = (usage.ratedCostMicro || 0) / 1000000
-        costData.costs.total = costData.costs.real // 保持兼容
-        costData.formatted.total = `$${costData.costs.real.toFixed(6)}`
+        // 统一为“计费口径”（rated），与限额/每日费用一致
+        costData.costs.total = costData.costs.rated
+        costData.formatted.total = `$${costData.costs.rated.toFixed(6)}`
       }
 
       modelStats.push({
@@ -1374,8 +1375,9 @@ router.post('/api/user-model-stats', async (req, res) => {
         if (hasStoredCost) {
           costData.costs.real = realCostMicro / 1000000
           costData.costs.rated = ratedCostMicro / 1000000
-          costData.costs.total = costData.costs.real
-          costData.formatted.total = `$${costData.costs.real.toFixed(6)}`
+          // 统一为“计费口径”（rated），与限额/每日费用一致
+          costData.costs.total = costData.costs.rated
+          costData.formatted.total = `$${costData.costs.rated.toFixed(6)}`
         }
 
         // alltime 键不存储 allTokens，需要计算
