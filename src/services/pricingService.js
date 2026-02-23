@@ -75,6 +75,16 @@ class PricingService {
       // 未来可以添加更多 1M 模型的价格
     }
 
+    // Codex 模型计费别名（强制映射）。
+    // 维护方式：只需要在这里增删映射，不用在 getModelPricing 里堆 if/else。
+    this.codexModelAliases = {
+      // gpt-5.3-codex 暂按 gpt-5.2-codex 计费
+      'gpt-5.3-codex': 'gpt-5.2-codex'
+    }
+
+    // Codex 基础兜底顺序（当目标模型与版本回退都找不到时）。
+    this.codexBaseFallbackOrder = ['gpt-5-codex', 'gpt-5']
+
     // 兜底价格：用于镜像数据缺失时仍保持计费一致性
     this.codexPricingFallbacks = {
       // 按 gpt-5.2-codex 计费（单位：美元/token）
@@ -396,42 +406,178 @@ class PricingService {
     }
   }
 
+  _splitModelName(modelName) {
+    const slashIndex = modelName.lastIndexOf('/')
+    if (slashIndex === -1) {
+      return {
+        prefix: '',
+        base: modelName
+      }
+    }
+
+    return {
+      prefix: modelName.slice(0, slashIndex + 1),
+      base: modelName.slice(slashIndex + 1)
+    }
+  }
+
+  _getPricingByBase(baseModel, prefix = '', options = {}) {
+    const { includeHardcoded = true } = options
+    const candidates = []
+
+    if (prefix) {
+      candidates.push(`${prefix}${baseModel}`)
+    }
+    candidates.push(baseModel)
+
+    for (const key of candidates) {
+      if (this.pricingData[key]) {
+        return { pricing: this.pricingData[key], key }
+      }
+    }
+
+    if (includeHardcoded && this.codexPricingFallbacks[baseModel]) {
+      return {
+        pricing: this.codexPricingFallbacks[baseModel],
+        key: `hardcoded:${baseModel}`
+      }
+    }
+
+    return null
+  }
+
+  _extractCodexMinorVersion(baseModel) {
+    const match = baseModel.match(/^gpt-5\.(\d+)-codex$/)
+    if (!match) {
+      return null
+    }
+    return parseInt(match[1], 10)
+  }
+
+  _resolveCodexAliasBase(baseModel) {
+    if (!baseModel) {
+      return baseModel
+    }
+
+    const visited = new Set()
+    let current = baseModel
+
+    while (this.codexModelAliases[current] && !visited.has(current)) {
+      visited.add(current)
+      current = this.codexModelAliases[current]
+    }
+
+    return current
+  }
+
+  _findNearestCodexPricing(baseModel, prefix = '') {
+    const targetMinor = this._extractCodexMinorVersion(baseModel)
+    if (targetMinor === null) {
+      return null
+    }
+
+    const knownBases = new Set()
+    for (const key of Object.keys(this.pricingData)) {
+      knownBases.add(this._splitModelName(key).base)
+    }
+    for (const key of Object.keys(this.codexPricingFallbacks)) {
+      knownBases.add(key)
+    }
+
+    let bestMinor = -1
+    let bestBase = null
+
+    for (const candidateBase of knownBases) {
+      const candidateMinor = this._extractCodexMinorVersion(candidateBase)
+      if (candidateMinor === null) {
+        continue
+      }
+
+      if (candidateMinor <= targetMinor && candidateMinor > bestMinor) {
+        bestMinor = candidateMinor
+        bestBase = candidateBase
+      }
+    }
+
+    if (!bestBase) {
+      return null
+    }
+
+    const resolvedBase = this._resolveCodexAliasBase(bestBase)
+    const pricingInfo = this._getPricingByBase(resolvedBase, prefix, { includeHardcoded: true })
+    if (!pricingInfo) {
+      return null
+    }
+
+    return {
+      ...pricingInfo,
+      baseModel: bestBase,
+      resolvedBaseModel: resolvedBase
+    }
+  }
+
+  _resolveCodexPricing(modelName) {
+    const { prefix, base } = this._splitModelName(modelName)
+    const isGpt5CodexFamily = /^gpt-5(?:\.\d+)?-codex$/.test(base)
+
+    if (!isGpt5CodexFamily) {
+      return null
+    }
+
+    // 1) 强制别名优先（例如 5.3 -> 5.2）
+    const aliasTarget = this._resolveCodexAliasBase(base)
+    if (aliasTarget && aliasTarget !== base) {
+      const aliasPricing = this._getPricingByBase(aliasTarget, prefix, { includeHardcoded: true })
+      if (aliasPricing) {
+        logger.info(`💰 Using ${aliasTarget} pricing as forced alias for ${modelName}`)
+        return aliasPricing.pricing
+      }
+    }
+
+    // 2) 精确命中官方价格（包含 provider 前缀和无前缀）
+    const exactPricing = this._getPricingByBase(base, prefix, { includeHardcoded: false })
+    if (exactPricing) {
+      return exactPricing.pricing
+    }
+
+    // 3) 对 gpt-5.x-codex 自动回退到「最近可用的较低版本」
+    const nearestVersionPricing = this._findNearestCodexPricing(base, prefix)
+    if (nearestVersionPricing) {
+      logger.info(
+        `💰 Using nearest available codex pricing ${nearestVersionPricing.resolvedBaseModel} for ${modelName} (matched ${nearestVersionPricing.baseModel})`
+      )
+      return nearestVersionPricing.pricing
+    }
+
+    // 4) 最终兜底（gpt-5-codex -> gpt-5）
+    for (const fallbackBase of this.codexBaseFallbackOrder) {
+      const fallbackPricing = this._getPricingByBase(fallbackBase, prefix, {
+        includeHardcoded: true
+      })
+      if (fallbackPricing) {
+        logger.info(`💰 Using ${fallbackBase} pricing as fallback for ${modelName}`)
+        return fallbackPricing.pricing
+      }
+    }
+
+    return null
+  }
+
   // 获取模型价格信息
   getModelPricing(modelName) {
     if (!this.pricingData || !modelName) {
       return null
     }
 
-    // 强制别名：gpt-5.3-codex 一律按 gpt-5.2-codex 计费
-    // 说明：不能依赖“是否存在 gpt-5.3-codex 条目”，否则镜像变更会导致计费口径漂移
-    const isGpt53Codex =
-      modelName === 'gpt-5.3-codex' || modelName.endsWith('/gpt-5.3-codex')
-    if (isGpt53Codex) {
-      const prefixedFallbackKey = modelName.replace(/gpt-5\.3-codex$/, 'gpt-5.2-codex')
-      const fallbackPricing =
-        this.pricingData[prefixedFallbackKey] ||
-        this.pricingData['gpt-5.2-codex'] ||
-        this.codexPricingFallbacks['gpt-5.3-codex']
-
-      if (fallbackPricing) {
-        logger.info(`💰 Using gpt-5.2-codex pricing as forced fallback for ${modelName}`)
-        return fallbackPricing
-      }
+    const codexPricing = this._resolveCodexPricing(modelName)
+    if (codexPricing) {
+      return codexPricing
     }
 
     // 尝试直接匹配
     if (this.pricingData[modelName]) {
       logger.debug(`💰 Found exact pricing match for ${modelName}`)
       return this.pricingData[modelName]
-    }
-
-    // 特殊处理：gpt-5-codex 回退到 gpt-5
-    if (modelName === 'gpt-5-codex' && !this.pricingData['gpt-5-codex']) {
-      const fallbackPricing = this.pricingData['gpt-5']
-      if (fallbackPricing) {
-        logger.info(`💰 Using gpt-5 pricing as fallback for ${modelName}`)
-        return fallbackPricing
-      }
     }
 
     // 对于Bedrock区域前缀模型（如 us.anthropic.claude-sonnet-4-20250514-v1:0），
